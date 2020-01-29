@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# 2nd Version that takes into account stale mac addresses
 import pika
 import sys
 import base64
@@ -15,7 +16,7 @@ parameters=pika.ConnectionParameters('10.238.131.199',
                                           'arrisSales',
                                           credentials)
 deadMac ='002040DEAD01'
-#deadMac ='7823AEA32D81'
+#deadMac ='7823AEA32D29'
 
 connection = pika.BlockingConnection(parameters)
 channel = connection.channel()
@@ -94,6 +95,7 @@ def cmMacDiff(cmts,macArray):
 # once a dead mac is detected this method will compare the new mac list 
 # with the old to determine who died
         newBrick = False
+        newBrickList = []
 	filename = cmts +'.current'
         if os.path.isfile(filename):
                 previousMacList = [line.rstrip('\n') for line in open(filename)]
@@ -105,24 +107,30 @@ def cmMacDiff(cmts,macArray):
                 filename = cmts + '.detected'
                 f = open(filename,'w')
                 for item in listDiffset:
-                  f.write("%s\n" % item)
+                        f.write("%s\n" % item)
                 f.close
-                f =  open('detected.bricks','a+')
+
+                f = open('detected.bricks', 'a+')
                 currentMacList = [line.rstrip('\n') for line in f ]
+                f.close()
                 for item in listDiffset:
                  if not item in currentMacList:
                      #new brick has been detected
                    newBrick = True
-                   f.write("%s\n" % item)  
-                f.close
-                if newBrick == True:
-                   file = open('latestDeadModem.txt','w')
-                   file.write('The following MAC address may have become a dead modem : ')
-                   file.write("%s\n" % item)
-                   file.close
-                   print ('send email') 
+                   newBrickList.append(item)
+
+
+                if newBrick:
+                    f = open('detected.bricks', 'a+')
+                    g = open('latestDeadModem.txt', 'w')
+                    for item  in newBrickList:
+                        f.write("%s\n" % item)
+                        g.write(" the following address is a candidate for dead modem: %s\n" % item)
+                    f.close()
+                    g.close()
+                    print ('send email')
                    #t3.filesender --to 'rakeshashok;travismohr;vince@gmail.com' --cc brettnewman --attach latestDeadModem.txt  --subject 'Notification DEAD modem' 
-                print diffset
+
                 return
 # write the file if dead modem detect but no current list exists
               
@@ -150,7 +158,15 @@ def callback(ch, method, properties, body):
           
            macData = {"data":value} 
 #          print extract_element_from_json(macData,["data","macAddr"]) 
-           macArray =  extract_element_from_json(macData,["data","macAddr"]) 
+           macArray =  extract_element_from_json(macData,["data","macAddr"])
+           statusArray = extract_element_from_json(macData,["data","status"])
+
+#          Mark offline modems
+           for i in range(0,len(macArray)):
+               if statusArray[i] == 1:
+                  macArray[i] = 'OFFLINE'
+
+
            if deadMac in macArray:
            	print("DEAD mac found in cmts :  ",cmtsName)
                 cmMacDiff(cmtsName,macArray)
@@ -158,7 +174,8 @@ def callback(ch, method, properties, body):
    
            with open(filename,'w') as f:
              for item in macArray:
-               f.write("%s\n" % item)
+                 if item != 'OFFLINE':
+                    f.write("%s\n" % item)
              f.close
 
 
