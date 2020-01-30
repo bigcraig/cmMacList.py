@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # 2nd Version that takes into account stale mac addresses
+# 3rd version , will remmber if dead mac detected on previous poll of cmts
 import pika
 import sys
 import base64
@@ -16,8 +17,9 @@ parameters=pika.ConnectionParameters('10.238.131.199',
                                           'arrisSales',
                                           credentials)
 deadMac ='002040DEAD01'
-#deadMac ='7823AEA32D29'
+#ideadMac ='7823AEA32D29'
 
+deadCmtsList = []
 connection = pika.BlockingConnection(parameters)
 channel = connection.channel()
 
@@ -115,7 +117,7 @@ def cmMacDiff(cmts,macArray):
                 f.close()
                 for item in listDiffset:
                  if not item in currentMacList:
-                     #new brick has been detected
+                     #new brick has been detectedcat lat
                    newBrick = True
                    newBrickList.append(item)
 
@@ -168,9 +170,19 @@ def callback(ch, method, properties, body):
 
 
            if deadMac in macArray:
-           	print("DEAD mac found in cmts :  ",cmtsName)
-                cmMacDiff(cmtsName,macArray)
-                return	   
+           #check if cmts already in badcmts list
+            if cmtsName in deadCmtsList:
+               print ("dead mac already detected in cmts")
+               return
+            print("DEAD mac found in cmts :  ",cmtsName)
+            deadCmtsList.append(cmtsName)
+            cmMacDiff(cmtsName,macArray)
+            return
+
+           if cmtsName in deadCmtsList:
+               deadCmtsList.remove(cmtsName)
+               print("dead mac in cmts reset detected")
+
    
            with open(filename,'w') as f:
              for item in macArray:
