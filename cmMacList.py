@@ -11,34 +11,9 @@ import signal
 import StringIO
 import json
 import os.path
-credentials = pika.PlainCredentials('craig', 'craig')
-parameters=pika.ConnectionParameters('10.238.131.199',
-                                           5672,
-                                          'arrisSales',
-                                          credentials)
-deadMac ='002040DEAD01'
-#ideadMac ='7823AEA32D29'
+import time
+import signal
 
-deadCmtsList = []
-connection = pika.BlockingConnection(parameters)
-channel = connection.channel()
-
-channel.exchange_declare(exchange='tenant-out',
-                         exchange_type='topic',
-                         durable=True )
-result = channel.queue_declare('DEAD_DETECT',auto_delete=True)
-queue_name = result.method.queue
-
-
-binding_keys = sys.argv[1:]
-if not binding_keys:
-    sys.stderr.write("Usage: %s  [binding_key]\n" % sys.argv[0])
-    sys.exit(1)
-
-for binding_key in binding_keys:
-    channel.queue_bind(exchange='tenant-out',
-                       queue=queue_name,
-                       routing_key=binding_key)
 
 def extract_element_from_json(obj, path):
     '''
@@ -189,14 +164,49 @@ def callback(ch, method, properties, body):
                  if item != 'OFFLINE':
                     f.write("%s\n" % item)
              f.close
+def signal_handler(signal, frame):
+  sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+credentials = pika.PlainCredentials('craig', 'craig')
+parameters=pika.ConnectionParameters('10.238.131.199',
+                                           5672,
+                                          'arrisSales',
+                                          credentials)
+deadMac ='002040DEAD01'
+#deadMac ='7823AEA32D29'
+
+deadCmtsList = []
+while True:
+    try:
+        connection = pika.BlockingConnection(parameters)
+        channel = connection.channel()
+
+        channel.exchange_declare(exchange='tenant-out',
+                                 exchange_type='topic',
+                                 durable=True )
+        result = channel.queue_declare('DEAD_DETECT',auto_delete=True)
+        queue_name = result.method.queue
 
 
+        binding_keys = sys.argv[1:]
+        if not binding_keys:
+                sys.stderr.write("Usage: %s  [binding_key]\n" % sys.argv[0])
+                sys.exit(1)
+
+        for binding_key in binding_keys:
+            channel.queue_bind(exchange='tenant-out',
+                               queue=queue_name,
+                               routing_key=binding_key)
+    #      print json.dumps(parsed, indent=4, sort_keys=True)
+    #      print ("   " )
+        channel.basic_consume(callback,
+                              queue=queue_name,
+                              no_ack=True)
+
+        channel.start_consuming()
+    except pika.exceptions.ConnectionClosed:
+        print ('lost rabbit connection, attempting reconnect')
+        time.sleep(1)
 	
-#      print json.dumps(parsed, indent=4, sort_keys=True)  
-#      print ("   " )  
-channel.basic_consume(callback,
-                      queue=queue_name,
-                      no_ack=True)
-
-channel.start_consuming()
 
