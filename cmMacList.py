@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # 2nd Version that takes into account stale mac addresses
 # 3rd version , will remmber if dead mac detected on previous poll of cmts
+# 4th Version  , can handle connection loss without crashing
 import pika
 import sys
 import base64
