@@ -10,7 +10,9 @@ import json
 import os.path
 import time
 import signal
-
+import datetime
+# Script Munber 5
+# Script will detect new deadmodems  (ie modems
 def extract_element_from_json(obj, path):
     '''
     Extracts an element from a nested dictionary or
@@ -64,6 +66,17 @@ def extract_element_from_json(obj, path):
             outer_arr.append(extract(item, path, 0, []))
         return outer_arr
 # handle cntrl c
+def writeLog(str):
+    from datetime import datetime
+    now = datetime.now()
+    dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+    str = str +' ' + dt_string
+    f = open('dead.log', 'a+')
+    f.write(str + '\n')
+
+    f.close
+
+
 def signal_handler(signal, frame):
   sys.exit(0)
 
@@ -74,50 +87,61 @@ parameters=pika.ConnectionParameters('10.238.131.199',
                                            5672,
                                           'arrisSales',
                                           credentials)
-deadMac ='002040DEAD01'
-#deadMac ='7823AEA32D29'
+#deadMac ='002040DEAD01'
+deadMac ='7823AEA32D29'
 deadCmtsList = []
-deadCableMacList =[]
+deadCableMacList = []
+deadCableMacCmtsList = []
 # logic executed upon receiving messages from rabbitmq
 def callback(ch, method, properties, body):
     decoded_data = gzip.GzipFile(fileobj=StringIO.StringIO(body)).read()
     #      print(" Routing Key %r" % (method.routing_key))
     routerKeyList = str.split(method.routing_key, '.')
     cmtsName = routerKeyList[1]
+    cmts     = routerKeyList[1]
     messageType = routerKeyList[2]
-
+    print('message type received %s',messageType)
 
     if messageType == 'CmTopology' :
-        return
         parsed = json.loads(decoded_data)
         for key, value in dict.items(parsed):
         #    	  print key, value
 
             if key == "data":
+                macData = {"data": value}
+                #          print extract_element_from_json(macData,["data","macAddr"])
+                macArray = extract_element_from_json(macData, ["data", "macAddr"])
+                statusArray = extract_element_from_json(macData, ["data", "status"])
+                if deadMac in macArray:
 
-                 macData = {"data": value}
-            #          print extract_element_from_json(macData,["data","macAddr"])
-                 macArray = extract_element_from_json(macData, ["data", "macAddr"])
-                 statusArray = extract_element_from_json(macData, ["data", "status"])
-
-
-                 for i in range(0, len(macArray)):
-                        if statusArray[i] == 1:
-                            macArray[i] = 'OFFLINE'
-
-                 if deadMac in macArray:
-                # check if cmts already in badcmts list
+                    # check if cmts already in badcmts list
                     if cmtsName in deadCmtsList:
-                            print("dead mac already detected in cmts")
-                            return
+
+                        print("dead mac already detected in cmts")
+                        return
                     print("DEAD mac found in cmts :  ", cmtsName)
+
                     deadCmtsList.append(cmtsName)
                     return
 
-                 if cmtsName in deadCmtsList:
+
+                for i in range(0, len(macArray)):
+                     if statusArray[i] == 1:
+                        macArray[i] = 'OFFLINE'
+                filename = cmtsName + '.current'
+                with open(filename, 'w') as f:
+                     for item in macArray:
+                         if item != 'OFFLINE':
+                            f.write("%s\n" % item)
+                f.close
+                return
+
+
+                if cmtsName in deadCmtsList:
                         deadCmtsList.remove(cmtsName)
                         print("dead mac in cmts reset detected")
-    if (messageType == 'CmDsRfFactsCmts') or (messageType == 'CmUsRfFactsCmts') :
+    if messageType == 'CmDsRfFactsCmts' or messageType == 'CmUsRfFactsCmts' :
+        print('cm mac message received')
         parsed = json.loads(decoded_data)
         for key, value in dict.items(parsed):
 
@@ -126,17 +150,33 @@ def callback(ch, method, properties, body):
                  cableMacData = {"data": value}
                  modemMacArray = extract_element_from_json(cableMacData,["data","mac"])
                  cableMacArray = extract_element_from_json(cableMacData, ["data", "cableMac"])
+                 cableMacStatus = extract_element_from_json(cableMacData,["data","status"])
                  deadCableMac  = 'ALIVE'
                  for i in range(0, len(modemMacArray)):
-                   # print (modemMacArray[i])
-                   #print (cableMacArray[i])
+                    print (modemMacArray[i])
+                    print (cableMacArray[i]['name'])
 
                     if modemMacArray[i] == deadMac:
-                        deadCableMac = cableMacArray[i]
-                        if deadCableMac not in deadCableMacList:
+                        deadCableMac = cableMacArray[i]['name']
+                        deadCableMacCmts = cableMacArray[i]['name'] + cmtsName
+                        if deadCableMacCmts not in deadCableMacCmtsList:
+                            # find all offline modems on that cable mac
+                            for j in range(0, len(modemMacArray)):
+                                if cableMacStatus[j] == 1 and cableMacArray[j] == deadCableMac:
+                                    offlineModemsCableMacList.append(cableMacArray[j])
 
+                            # print any offline modems that intersect with current list
+                            #file =
+                            filename = cmts + '.current'
+                            if os.path.isfile(filename):
+                                previousMacList = [line.rstrip('\n') for line in open(filename)]
+                                set_previousMacList = set(previousMacList)
+                                set_offlineModemsCableMacList = set(offlineModemsCableMacList)
+                                deadModemCandidates = set_previousMacList.intersection(set_offlineModemsCableMacList)
                             deadCableMacList.append(deadCableMac)
+                            deadCableMacCmtsList.append(deadCableMacCmts)
                             print('dead modem detected in cablemac %s',deadCableMac)
+                            print('dead modem candidates %s',deadModemCandidates)
                             f = open('DEADCableMac.txt','w')
                             result = str(deadCableMac)
                             result = result + ' in CMTS ' + cmtsName
@@ -178,5 +218,6 @@ while True:
 
         channel.start_consuming()
     except pika.exceptions.ConnectionClosed:
-        print ('lost rabbit connection, attempting reconnect')
+        print ('lost connection')
+        writeLog ('lost rabbit connection, attempting reconnect')
         time.sleep(1)
